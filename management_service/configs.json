@@ -1,0 +1,78 @@
+{
+  "2994012c-ce67-46a3-83a1-9d1ce35ea418": {
+    "IP": "127.0.0.1",
+    "Port": 65432,
+    "Services": {
+      "Ping": {
+        "host": "4.2.2.2",
+        "ttl": 64,
+        "timeout": 1,
+        "sequence_number": 1,
+        "frequency": 50
+      },
+      "Tracert": {
+        "host": "4.2.2.2",
+        "max_hops": 30,
+        "pings_per_hop": 2,
+        "verbose": false,
+        "frequency": 50
+      },
+      "HTTP": {
+        "url": "http://engineering.oregonstate.edu/EECS",
+        "frequency": 50
+      },
+      "HTTPS": {
+        "url": "https://engineering.oregonstate.edu/EECS",
+        "frequency": 50,
+        "timeout": 6
+      }
+    }
+  },
+  "3a0472fe-d713-4ada-a4b3-ae4fbba3617b": {
+    "IP": "127.0.0.1",
+    "Port": 65431,
+    "Services": {
+      "NTP": {
+        "server": "time.apple.com",
+        "frequency": 50
+      },
+      "DNS": {
+        "dns_server": "8.8.8.8",
+        "query": "youtube.com",
+        "record_types": [
+          "A",
+          "MX",
+          "AAAA",
+          "CNAME"
+        ],
+        "frequency": 50
+      },
+      "TCP": {
+        "server": "youtube.com",
+        "port": 80,
+        "frequency": 50
+      }
+    }
+  },
+  "40786ac8-fa68-4360-a037-fc3623851472": {
+    "IP": "127.0.0.1",
+    "Port": 65430,
+    "Services": {
+      "HTTP": {
+        "url": "http://www.google.com",
+        "frequency": 50
+      },
+      "TCP": {
+        "server": "reddit.com",
+        "port": 80,
+        "frequency": 50
+      },
+      "UDP": {
+        "server": "reddit.com",
+        "port": 80,
+        "timeout": 3,
+        "frequency": 50
+      }
+    }
+  }
+}
