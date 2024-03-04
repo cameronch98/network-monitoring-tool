@@ -4,14 +4,15 @@ import time
 from datetime import datetime
 from typing import NoReturn
 
-from monitor_service.network_tests import local_tcp_echo
+from network_tests import check_udp_port
 
 
-class EchoTask(threading.Thread):
+class UDPTask(threading.Thread):
     def __init__(
         self,
         ip_address: str,
         port: int,
+        timeout: int = 3,
         frequency: int = 30,
         conn: socket.socket = None,
     ):
@@ -20,6 +21,7 @@ class EchoTask(threading.Thread):
         # Define parameters
         self._ip_address: str = ip_address
         self._port: int = port
+        self._timeout: int = timeout
         self._frequency: int = frequency
 
         # Define control attributes
@@ -39,7 +41,7 @@ class EchoTask(threading.Thread):
                 if self.paused:
                     self.condition.wait()  # Wait until the task is resumed
                 else:
-                    result = local_tcp_echo(self._ip_address, self._port)
+                    result = check_udp_port(self._ip_address, self._port, self._timeout)
                     self._msgs.append(
                         f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] - {result}"
                     )
@@ -66,8 +68,14 @@ class EchoTask(threading.Thread):
             self._msgs = []  # Clear msgs in case of successful send
         except socket.error as e:
             print(f"Socket error: {e}")
-            print(f"Saving message for reconnection ...")
+            print(
+                f"Saving udp task results for reconnection - results saved: {len(self._msgs)}"
+            )
             self._conn.close()
+        except KeyboardInterrupt:
+            print("Process interrupted by CTRL + C")
+            self._conn.close()
+            self.stop()
 
     def set_connection(self, conn: socket.socket) -> NoReturn:
         """Set the connection data is being sent over"""

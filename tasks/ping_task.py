@@ -4,22 +4,27 @@ import time
 from datetime import datetime
 from typing import NoReturn
 
-from monitor_service.network_tests import check_server_https
+from network_tests import ping
 
 
-class HTTPSTask(threading.Thread):
+class PingTask(threading.Thread):
     def __init__(
         self,
-        url: str,
-        timeout: int = 5,
+        host: str,
+        ttl: int = 64,
+        timeout: int = 1,
+        sequence_number: int = 1,
         frequency: int = 30,
         conn: socket.socket = None,
-    ):
+    ) -> None:
+        # Super call
         super().__init__()
 
         # Define parameters
-        self._url: str = url
+        self._host: str = host
+        self._ttl: int = ttl
         self._timeout: int = timeout
+        self._sequence_number: int = sequence_number
         self._frequency: int = frequency
 
         # Define control attributes
@@ -27,7 +32,7 @@ class HTTPSTask(threading.Thread):
         self.stopped: bool = False  # Indicates if the task is stopped
         self.condition: threading.Condition = threading.Condition()
 
-        # Socket
+        # Connection
         self._conn: socket.socket = conn
 
         # Messages
@@ -39,7 +44,9 @@ class HTTPSTask(threading.Thread):
                 if self.paused:
                     self.condition.wait()  # Wait until the task is resumed
                 else:
-                    result = check_server_https(self._url, self._timeout)
+                    result = ping(
+                        self._host, self._ttl, self._timeout, self._sequence_number
+                    )
                     self._msgs.append(
                         f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] - {result}"
                     )
@@ -66,8 +73,14 @@ class HTTPSTask(threading.Thread):
             self._msgs = []  # Clear msgs in case of successful send
         except socket.error as e:
             print(f"Socket error: {e}")
-            print(f"Saving message for reconnection ...")
+            print(
+                f"Saving ping task results for reconnection - results saved: {len(self._msgs)}"
+            )
             self._conn.close()
+        except KeyboardInterrupt:
+            print("Process interrupted by CTRL + C")
+            self._conn.close()
+            self.stop()
 
     def set_connection(self, conn: socket.socket) -> NoReturn:
         """Set the connection data is being sent over"""

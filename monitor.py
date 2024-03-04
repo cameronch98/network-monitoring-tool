@@ -1,6 +1,7 @@
 import pickle
+import socket
+import time
 
-from network_tests import *
 from tasks.dns_task import DNSTask
 from tasks.echo_task import EchoTask
 from tasks.http_task import HTTPTask
@@ -22,11 +23,11 @@ class Monitor:
     NEED TO BE UPDATED TO INTAKE THE CONNECTION AND SEND THINGS OVER THE SOCKET INSTEAD OF PRINTING THOUGH.
     """
 
-    def __init__(self, host: str = "127.0.0.1", port: int = 65432):
+    def __init__(self, monitor_host: str = "127.0.0.1", monitor_port: int = 65432):
         # Identification
         self._id = ""  # Generate a random id or something
-        self.host: str = host  # Server host address
-        self.port: int = port  # Server port number
+        self._monitor_host: str = monitor_host  # Server host address
+        self._monitor_port: int = monitor_port  # Server port number
 
         # Tasks
         self._tasks: dict = {}
@@ -34,21 +35,16 @@ class Monitor:
     def start(self):
         """Set up connection for management_service to send commands"""
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-            s.bind((self.host, self.port))
+            s.bind((self._monitor_host, self._monitor_port))
             s.listen()
             while True:
-                print(f"Listening for connections on {self.host}:{self.port}")
+                print(f"Listening for connections on {self._monitor_host}:{self._monitor_port}")
                 conn, addr = s.accept()
                 with conn:
                     print(f"Connected by: {addr}\n")
 
-                    # Reconnect existing threads if active tasks
-                    if self._tasks:
-                        self.reconnect_tasks(conn)
-
                     try:
                         while True:
-
                             # Receive command
                             command = conn.recv(1024).decode("utf-8")
 
@@ -66,14 +62,24 @@ class Monitor:
                                 print(f"ID received and set: {self._id}\n")
 
                             elif command == "START":
-                                print("Awaiting task ...")
-                                conn.sendall("awaiting tasks ...".encode("utf-8"))
-                                config = conn.recv(1024)
-                                config = pickle.loads(config)
-                                print(f"Tasks received: {config}\n")
-                                conn.sendall("tasks started!".encode("utf-8"))
-                                self.configure_tasks(config, conn)
-                                self.start_tasks()
+                                # Skip config and reconnect existing threads if active tasks
+                                if self._tasks:
+                                    print(
+                                        "Tasks already started! Reconnecting task threads to send data ..."
+                                    )
+                                    conn.sendall(
+                                        "reconnecting tasks ...".encode("utf-8")
+                                    )
+                                    self.reconnect_tasks(conn)
+                                else:
+                                    print("Awaiting task ...")
+                                    conn.sendall("awaiting tasks ...".encode("utf-8"))
+                                    config = conn.recv(1024)
+                                    config = pickle.loads(config)
+                                    print(f"Tasks received: {config}\n")
+                                    conn.sendall("tasks started!".encode("utf-8"))
+                                    self.configure_tasks(config, conn)
+                                    self.start_tasks()
 
                             elif command == "QUIT":
                                 print("Stopping tasks ...")
@@ -83,14 +89,16 @@ class Monitor:
                                 conn.close()
                                 break
 
-                    except socket.error or KeyboardInterrupt:
-                        print("Stopping tasks ...")
+                    except socket.error as e:
+                        print(f"Socket error: {e}")
+
+                    except KeyboardInterrupt:
+                        print("Process interrupted by CTRL + C")
+                        print("Killing tasks ...")
                         self.stop_tasks()
-                        print("Connection closing ...")
-                        conn.close()
-                        break
 
                     finally:
+                        print("Connection closing ...")
                         conn.close()
 
     def configure_tasks(self, config, conn):
@@ -119,28 +127,18 @@ class Monitor:
     def start_tasks(self):
         """Start all tasks in task list"""
         for task in self._tasks.values():
-            task.run()
+            print("Starting task {}".format(task))
+            task.start()
 
     def reconnect_tasks(self, conn: socket.socket):
         """Re-establishes conn in task threads after reconnection"""
-        for task in self._tasks:
+        for task in self._tasks.values():
             task.set_connection(conn)
-
-    def pause_tasks(self):
-        """Pause all tasks in task list"""
-        for task in self._tasks.values():
-            task.pause()
-
-    def resume_tasks(self):
-        """Pause all tasks in task list"""
-        for task in self._tasks.values():
-            task.resume()
 
     def stop_tasks(self):
         """Stop all tasks in task list"""
         for task in self._tasks.values():
             task.stop()
-        self._tasks = []
 
 
 if __name__ == "__main__":

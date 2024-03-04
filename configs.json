@@ -23,8 +23,8 @@
       },
       "HTTPS": {
         "url": "https://engineering.oregonstate.edu/EECS",
-        "frequency": 50,
-        "timeout": 6
+        "timeout": 6,
+        "frequency": 50
       }
     }
   },

@@ -4,15 +4,27 @@ import time
 from datetime import datetime
 from typing import NoReturn
 
-from monitor_service.network_tests import check_server_http
+from network_tests import traceroute
 
 
-class HTTPTask(threading.Thread):
-    def __init__(self, url: str, frequency: int = 30, conn: socket.socket = None):
+class TracertTask(threading.Thread):
+    def __init__(
+        self,
+        host: str,
+        max_hops: int = 30,
+        pings_per_hop: int = 1,
+        verbose: bool = False,
+        frequency: int = 30,
+        conn: socket.socket = None,
+    ):
+        # Super call
         super().__init__()
 
         # Define parameters
-        self._url: str = url
+        self._host: str = host
+        self._max_hops: int = max_hops
+        self._pings_per_hop: int = pings_per_hop
+        self._verbose: bool = verbose
         self._frequency: int = frequency
 
         # Define control attributes
@@ -32,7 +44,9 @@ class HTTPTask(threading.Thread):
                 if self.paused:
                     self.condition.wait()  # Wait until the task is resumed
                 else:
-                    result = check_server_http(self._url)
+                    result = traceroute(
+                        self._host, self._max_hops, self._pings_per_hop, self._verbose
+                    )
                     self._msgs.append(
                         f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] - {result}"
                     )
@@ -59,8 +73,14 @@ class HTTPTask(threading.Thread):
             self._msgs = []  # Clear msgs in case of successful send
         except socket.error as e:
             print(f"Socket error: {e}")
-            print(f"Saving message for reconnection ...")
+            print(
+                f"Saving traceroute task results for reconnection - results saved: {len(self._msgs)}"
+            )
             self._conn.close()
+        except KeyboardInterrupt:
+            print("Process interrupted by CTRL + C")
+            self._conn.close()
+            self.stop()
 
     def set_connection(self, conn: socket.socket) -> NoReturn:
         """Set the connection data is being sent over"""

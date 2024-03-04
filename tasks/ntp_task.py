@@ -4,26 +4,15 @@ import time
 from datetime import datetime
 from typing import NoReturn
 
-from monitor_service.network_tests import check_dns_server_status
+from network_tests import check_ntp_server
 
 
-class DNSTask(threading.Thread):
-    def __init__(
-        self,
-        server: str,
-        query: str,
-        record_types: list = None,
-        frequency: int = 30,
-        conn: socket.socket = None,
-    ):
+class NTPTask(threading.Thread):
+    def __init__(self, server: str, frequency: int = 30, conn: socket.socket = None):
         super().__init__()
 
         # Define parameters
-        if record_types is None:
-            record_types = []
         self._server: str = server
-        self._query: str = query
-        self._record_types: list = record_types
         self._frequency: int = frequency
 
         # Define control attributes
@@ -43,13 +32,10 @@ class DNSTask(threading.Thread):
                 if self.paused:
                     self.condition.wait()  # Wait until the task is resumed
                 else:
-                    for record_type in self._record_types:
-                        result = check_dns_server_status(
-                            self._server, self._query, record_type
-                        )
-                        self._msgs.append(
-                            f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] - {result}"
-                        )
+                    result = check_ntp_server(self._server)
+                    self._msgs.append(
+                        f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] - {result}"
+                    )
                     self.send_msgs()
             time.sleep(self._frequency)  # Wait for the set frequency
 
@@ -73,8 +59,14 @@ class DNSTask(threading.Thread):
             self._msgs = []  # Clear msgs in case of successful send
         except socket.error as e:
             print(f"Socket error: {e}")
-            print(f"Saving message for reconnection ...")
+            print(
+                f"Saving ntp task results for reconnection - results saved: {len(self._msgs)}"
+            )
             self._conn.close()
+        except KeyboardInterrupt:
+            print("Process interrupted by CTRL + C")
+            self._conn.close()
+            self.stop()
 
     def set_connection(self, conn: socket.socket) -> NoReturn:
         """Set the connection data is being sent over"""
