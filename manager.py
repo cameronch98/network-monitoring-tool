@@ -11,34 +11,42 @@ class Manager:
     def __init__(self):
 
         # Monitor service configurations
-        self._configs = {}
+        self._configs: dict = {}
         self.read_config()
 
         # Threading
-        self._clients = {}
-        self._lock = threading.Lock()
+        self._clients: dict = {}
+        self._lock: threading.Lock = threading.Lock()
+        self._event: threading.Event = threading.Event()
 
     def start_manager(self):
         """Main command center"""
-        print("What would you like to do?")
-        print("1. Create new config")
-        print("2. Load a monitor_service service")
-        print("3. Load all monitor_service services")
-        print("4. Exit")
+        try:
+            print("What would you like to do?")
+            print("1. Create new config")
+            print("2. Load a monitor_service service")
+            print("3. Load all monitor_service services")
+            print("4. Exit")
 
-        command = input("\nEnter command number: ")
-        if command == "1":
-            pass
+            command = input("\nEnter command number: ")
+            if command == "1":
+                pass
 
-        elif command == "2":
-            self.load_monitor()
+            elif command == "2":
+                self.load_monitor()
 
-        elif command == "3":
-            self.load_all_monitors()
+            elif command == "3":
+                self.load_all_monitors()
 
-        elif command == "4":
-            print("Exiting ...")
-            exit()
+            elif command == "4":
+                print("Exiting ...")
+                exit()
+
+        except KeyboardInterrupt:
+            print("Keyboard interrupt detected ... shutting down clients")
+            self._event.set()
+            for client in self._clients.values():
+                client.join()
 
     def load_monitor(self):
         """Starts control client for a chosen monitor_service service"""
@@ -49,7 +57,7 @@ class Manager:
 
         # Start control client
         self._clients[monitor_id] = ControlClient(
-            monitor_id, host, port, services, self._lock
+            monitor_id, host, port, services, self._event, self._lock
         )
         self._clients[monitor_id].start()
         print(f"Monitor service at {host}:{port} has been loaded!")
@@ -60,10 +68,12 @@ class Manager:
         for monitor_id, config in self._configs.items():
             host, port, services = config["IP"], config["Port"], config["Services"]
             self._clients[monitor_id] = ControlClient(
-                monitor_id, host, port, services, self._lock
+                monitor_id, host, port, services, self._event, self._lock
             )
             self._clients[monitor_id].start()
-        print("All monitor_service services loaded!")
+        time.sleep(5)
+        print("All available monitor services loaded!")
+        print("\nPress Ctrl+C to Stop")
 
     def read_config(self):
         """Updates self._configs with current config file"""
@@ -82,38 +92,35 @@ class Manager:
         return self._configs
 
 
-class ControlClient(threading.Thread, Manager):
+class ControlClient(threading.Thread):
     def __init__(
         self,
         monitor_id: str,
-        host: str,
-        port: int,
+        monitor_host: str,
+        monitor_port: int,
         services: dict,
+        event: threading.Event,
         lock: threading.Lock,
     ):
         super().__init__()
 
         # Set params
         self._monitor_id: str = monitor_id
-        self._host: str = host
-        self._port: int = port
+        self._monitor_host: str = monitor_host
+        self._monitor_port: int = monitor_port
         self._services: dict = services
 
         # Socket
         self._socket: socket.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 
-        # Config
-        self._configs: dict = {}
-        self.read_config()
-
         # Threading
-        self._lock = lock
+        self._lock: threading.Lock = lock
+        self._event: threading.Event = event
 
     def run(self):
         """Start up socket and handle client behavior"""
-        while True:
+        while not self._event.is_set():
             try:
-
                 # Connect to monitor_service service
                 self.connect()
                 time.sleep(2)
@@ -131,15 +138,10 @@ class ControlClient(threading.Thread, Manager):
 
             except socket.error:
                 print(
-                    f"Error with connection to monitor_service service at {self._host}:{self._port} ... trying to reconnect!"
+                    f"Error with connection to monitor_service service at {self._monitor_host}:{self._monitor_port} ... trying to reconnect!"
                 )
                 self._socket.close()
                 time.sleep(10)
-
-            except KeyboardInterrupt:
-                print("\n\nClosing sockets and returning to main menu!\n")
-                self._socket.close()
-                break
 
     def connect(self):
         """Connect to monitor_service service"""
@@ -151,22 +153,24 @@ class ControlClient(threading.Thread, Manager):
         self._socket.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
 
         while True:
-            with self._lock:
-                try:
-                    print(
-                        f"Attempting to connect to monitor_service service at {self._host}:{self._port} ..."
-                    )
-                    self._socket.connect((self._host, self._port))
-                    print(
-                        f"Successfully connected to monitor_service service at {self._host}:{self._port}\n"
-                    )
-                    break
+            self._lock.acquire()
+            try:
+                print(
+                    f"Attempting to connect to monitor_service service at {self._monitor_host}:{self._monitor_port} ..."
+                )
+                self._socket.connect((self._monitor_host, self._monitor_port))
+                print(
+                    f"Successfully connected to monitor_service service at {self._monitor_host}:{self._monitor_port}\n"
+                )
+                self._lock.release()
+                break
 
-                except socket.error:
-                    print(
-                        f"Connection to monitor_service service at {self._host}:{self._port} failed! Trying again!\n"
-                    )
-                    time.sleep(15)
+            except socket.error:
+                print(
+                    f"Connection to monitor_service service at {self._monitor_host}:{self._monitor_port} failed! Trying again!\n"
+                )
+                self._lock.release()
+                time.sleep(15)
 
     def set_id(self):
         """Send monitor_service service an ID"""
@@ -176,7 +180,7 @@ class ControlClient(threading.Thread, Manager):
                 response = self.send_command("SET_ID")
                 if response == "awaiting ID ...":
                     print(
-                        f"Sending ID {self._monitor_id} to monitor_service service at {self._host}:{self._port}\n"
+                        f"Sending ID {self._monitor_id} to monitor_service service at {self._monitor_host}:{self._monitor_port}\n"
                     )
                     self._socket.send(self._monitor_id.encode("utf-8"))
             except socket.error as e:
@@ -189,22 +193,21 @@ class ControlClient(threading.Thread, Manager):
 
     def send_command(self, command):
         """Send command over given monitor_service service"""
-        with self._lock:
-            try:
-                # Send command
-                print(
-                    f"Sending {command} command to monitor_service service {self._monitor_id} at {self._host}:{self._port}"
-                )
-                self._socket.sendall(command.encode())
+        try:
+            # Send command
+            print(
+                f"Sending {command} command to monitor_service service {self._monitor_id} at {self._monitor_host}:{self._monitor_port}"
+            )
+            self._socket.sendall(command.encode())
 
-                # Await acknowledgment
-                response = self._socket.recv(1024).decode("utf-8")
-                print(
-                    f"Command to monitor_service {self._monitor_id} acknowledged: {response}"
-                )
-                return response
-            except socket.error as e:
-                print(f"Socket error: {e}")
+            # Await acknowledgment
+            response = self._socket.recv(1024).decode("utf-8")
+            print(
+                f"Command to monitor_service {self._monitor_id} acknowledged: {response}"
+            )
+            return response
+        except socket.error as e:
+            print(f"Socket error: {e}")
 
     def distribute_tasks(self):
         """Distribute defined tasks to monitors"""
@@ -217,9 +220,7 @@ class ControlClient(threading.Thread, Manager):
                 if response == "awaiting tasks ...":
 
                     # Create task config data and send
-                    task_configs = pickle.dumps(
-                        self._configs[self._monitor_id]["Services"]
-                    )
+                    task_configs = pickle.dumps(self._services)
                     self._socket.sendall(task_configs)
 
                     # Await confirmation of tasks
@@ -233,24 +234,19 @@ class ControlClient(threading.Thread, Manager):
 
     def monitor_status(self):
         """Await results and status updates for given monitor_service service"""
-        print("PRESS CTRL+C TO STOP")
         # Await responses until error or condition
         try:
             while True:
-                with self._lock:
-                    response = self._socket.recv(1024).decode("utf-8")
-                    if response:
+                response = self._socket.recv(1024).decode("utf-8")
+                if response:
+                    with self._lock:
                         print(response)
-                    else:
-                        break
-        except KeyboardInterrupt:
-            response = self.send_command("QUIT")
-            print(response)
-            print("Exiting status monitor_service ...\n")
-            time.sleep(2)
+                else:
+                    break
+
         except socket.error:
             print(
-                f"Connection to monitor_service ${self._configs[self._monitor_id]['IP'], self._configs[self._monitor_id]['Port']} lost!"
+                f"Connection to monitor_service ${self._monitor_host, self._monitor_port} lost!"
             )
             self._socket.close()
 

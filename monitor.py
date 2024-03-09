@@ -1,27 +1,14 @@
 import pickle
+import shutil
 import socket
-import time
+import threading
+from datetime import datetime
+from typing import NoReturn
 
-from tasks.dns_task import DNSTask
-from tasks.echo_task import EchoTask
-from tasks.http_task import HTTPTask
-from tasks.https_task import HTTPSTask
-from tasks.ntp_task import NTPTask
-from tasks.ping_task import PingTask
-from tasks.tcp_task import TCPTask
-from tasks.tracert_task import TracertTask
-from tasks.udp_task import UDPTask
+from service_checks import run_service_check
 
 
 class Monitor:
-    """
-    CURRENTLY INCLUDING ALL TESTS FOR MONITORING IN THE CLASS. PLAY AROUND WITH IMPORTING AND JUST CALLING THE METHODS
-    INSTEAD SINCE YOU CAN JUST PASS THEM THE THREAD OBJECTS AND CONFIG TO LET MONITOR KEEP CONTROL BUT STAY MORE
-    MODULAR. THIS MAY BE BETTER BUT NEED TO TRY BOTH. IF SO, YOU MAY WANT TO TRY BOTH KEEPING SERVER AS AN INPUT
-    PARAM OR NOT. IT MIGHT BE FINE TO JUST KEEP THINGS HOW THEY ARE AND ADD ANOTHER LAYER OF NESTING TO THE SERVER_DICT.
-    THIS COULD SAVE A LOT OF TIME AND ALL YOUR FUNCTIONS COULD REMAIN THE SAME FOR THE MOST PART. THE SERVICE CHECKS
-    NEED TO BE UPDATED TO INTAKE THE CONNECTION AND SEND THINGS OVER THE SOCKET INSTEAD OF PRINTING THOUGH.
-    """
 
     def __init__(self, monitor_host: str = "127.0.0.1", monitor_port: int = 65432):
         # Identification
@@ -38,7 +25,9 @@ class Monitor:
             s.bind((self._monitor_host, self._monitor_port))
             s.listen()
             while True:
-                print(f"Listening for connections on {self._monitor_host}:{self._monitor_port}")
+                print(
+                    f"Listening for connections on {self._monitor_host}:{self._monitor_port}"
+                )
                 conn, addr = s.accept()
                 with conn:
                     print(f"Connected by: {addr}\n")
@@ -105,24 +94,11 @@ class Monitor:
         """Starts task instances based on config"""
         # Create the task objects/threads
         for task, params in config.items():
-            if task == "Ping":
-                self._tasks[task] = PingTask(*params.values(), conn)
-            elif task == "Tracert":
-                self._tasks[task] = TracertTask(*params.values(), conn)
-            elif task == "HTTP":
-                self._tasks[task] = HTTPTask(*params.values(), conn)
-            elif task == "HTTPS":
-                self._tasks[task] = HTTPSTask(*params.values(), conn)
-            elif task == "NTP":
-                self._tasks[task] = NTPTask(*params.values(), conn)
-            elif task == "DNS":
-                self._tasks[task] = DNSTask(*params.values(), conn)
-            elif task == "TCP":
-                self._tasks[task] = TCPTask(*params.values(), conn)
-            elif task == "UDP":
-                self._tasks[task] = UDPTask(*params.values(), conn)
-            elif task == "Echo":
-                self._tasks[task] = EchoTask(*params.values(), conn)
+            frequency = params["frequency"]
+            del params["frequency"]
+            self._tasks[task] = NetworkTask(
+                self._monitor_host, self._monitor_port, task, params, frequency, conn
+            )
 
     def start_tasks(self):
         """Start all tasks in task list"""
@@ -141,6 +117,89 @@ class Monitor:
             task.stop()
 
 
+class NetworkTask(threading.Thread):
+    def __init__(
+        self,
+        monitor_host: str,
+        monitor_port: int,
+        task: str,
+        params: dict,
+        frequency: int,
+        conn: socket.socket = None,
+    ):
+        super().__init__()
+
+        # Monitor information
+        self._monitor_host: str = monitor_host
+        self._monitor_port: int = monitor_port
+
+        # Network test information
+        self._task: str = task
+        self._params: dict = params
+
+        # Thread control
+        self._event: threading.Event = threading.Event()
+        self._frequency: int = frequency
+
+        # Connection to send data over
+        self._conn: socket.socket = conn
+
+        # Messages to send
+        self._msgs: list = []
+
+    def run(self) -> NoReturn:
+        # Loop until thread event is set
+        while not self._event.is_set():
+            try:
+                msg = ""
+
+                # Header
+                columns, lines = shutil.get_terminal_size()
+                msg += f"\n[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] {self._task} Service Check\n[Monitor: {self._monitor_host}:{self._monitor_port}]\n"
+                msg += "=" * columns + "\n"
+
+                # Get results
+                print(
+                    f"[Monitor: {self._monitor_host}:{self._monitor_port}] - performing {self._task} test ..."
+                )
+                msg += run_service_check(self._task, self._params.values())
+
+                # Send message
+                self._msgs.append(msg)
+                self.send_msgs()
+
+            except KeyboardInterrupt:
+                print("Process interrupted by CTRL + C")
+                self._conn.close()
+                self.stop()
+
+            # Sleep the loop for the given interval
+            self._event.wait(self._frequency)
+
+    def stop(self) -> NoReturn:
+        """Stop thread by setting event and joining"""
+        self._event.set()
+        self.join()
+
+    def send_msgs(self):
+        """Send messages currently stored in self._msgs"""
+        try:
+            self._conn.sendall("\n".join(self._msgs).encode())
+            self._msgs = []  # Clear msgs in case of successful send
+        except socket.error as e:
+            print(f"Socket error: {e}")
+            print(
+                f"Saving {self._task} task results for reconnection - results saved: {len(self._msgs)}"
+            )
+            self._conn.close()
+
+    def set_connection(self, conn: socket.socket) -> NoReturn:
+        """Set the connection data is being sent over"""
+        self._conn = conn
+
+
 if __name__ == "__main__":
-    monitor = Monitor()
+    ip = input("Enter IP for monitor: ")
+    port = int(input("Enter port for monitor: "))
+    monitor = Monitor(ip, port)
     monitor.start()
