@@ -26,7 +26,7 @@ class Monitor:
             s.listen()
             while True:
                 print(
-                    f"Listening for connections on {self._monitor_host}:{self._monitor_port}"
+                    f"Listening for connections on {self._monitor_host}:{self._monitor_port}\n"
                 )
                 conn, addr = s.accept()
                 with conn:
@@ -81,13 +81,8 @@ class Monitor:
                     except socket.error as e:
                         print(f"Socket error: {e}")
 
-                    except KeyboardInterrupt:
-                        print("Process interrupted by CTRL + C")
-                        print("Killing tasks ...")
-                        self.stop_tasks()
-
                     finally:
-                        print("Connection closing ...")
+                        print("MANAGER CONNECTION LOST")
                         conn.close()
 
     def configure_tasks(self, config, conn):
@@ -155,12 +150,12 @@ class NetworkTask(threading.Thread):
 
                 # Header
                 columns, lines = shutil.get_terminal_size()
-                msg += f"\n[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] {self._task} Service Check\n[Monitor: {self._monitor_host}:{self._monitor_port}]\n"
+                msg += f"\n[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}][Monitor: {self._monitor_host}:{self._monitor_port}] {self._task} Service Check \n"
                 msg += "=" * columns + "\n"
 
                 # Get results
                 print(
-                    f"[Monitor: {self._monitor_host}:{self._monitor_port}] - performing {self._task} test ..."
+                    f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}][Monitor: {self._monitor_host}:{self._monitor_port}] - performing {self._task} test ..."
                 )
                 msg += run_service_check(self._task, self._params.values())
 
@@ -186,8 +181,7 @@ class NetworkTask(threading.Thread):
         try:
             self._conn.sendall("\n".join(self._msgs).encode())
             self._msgs = []  # Clear msgs in case of successful send
-        except socket.error as e:
-            print(f"Socket error: {e}")
+        except socket.error:
             print(
                 f"Saving {self._task} task results for reconnection - results saved: {len(self._msgs)}"
             )
