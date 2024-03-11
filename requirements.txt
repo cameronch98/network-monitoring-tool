@@ -1,0 +1,16 @@
+black==24.2.0
+certifi==2024.2.2
+charset-normalizer==3.3.2
+click==8.1.7
+dnspython==2.6.1
+idna==3.6
+lorem==0.1.1
+mypy-extensions==1.0.0
+ntplib==0.4.0
+packaging==23.2
+pathspec==0.12.1
+platformdirs==4.2.0
+prompt-toolkit==3.0.43
+requests==2.31.0
+urllib3==2.2.1
+wcwidth==0.2.13

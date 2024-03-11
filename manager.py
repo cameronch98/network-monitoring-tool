@@ -11,7 +11,7 @@ from typing import Any
 
 from prompts import *
 
-restart_flag = False
+client_shutdown_flag = False
 
 
 class Manager:
@@ -56,36 +56,35 @@ class Manager:
 
             elif command == "6":
                 print("Exiting ...")
-                exit()
+                break
 
-    def restart_handler(self, signum: int, frame: Any) -> None:
+    def client_shutdown_handler(self, signum: int, frame: Any) -> None:
         """Kill threads and restart application"""
-        global restart_flag
-        restart_flag = True
+        global client_shutdown_flag
+        client_shutdown_flag = True
         print("\nInterrupt detected!")
 
         # Close sockets and kill client threads
         for client in self._clients.values():
 
-            # Send command to quit tasks
-            client.send_command("QUIT")
-
-            # Close sockets/kill threads
-            print("Closing sockets ...")
-            client.close()
+            # Kill threads
             print("Killing client threads ...")
             client.join()
 
-        # Clear clients dict
-        self._clients = {}
+            # Send command to quit
+            print("Telling monitors to stop tasks ...")
+            client.send_command("QUIT")
+
+            # Close sockets
+            print("Closing sockets ...")
+            client.close()
 
         # Reset flag
-        restart_flag = False
+        client_shutdown_flag = False
 
         # Restart menu
         print("Returning to main menu ...")
         time.sleep(4)
-        os.system("cls") if sys.platform.startswith("win") else os.system("clear")
         self.start_manager()
 
     def load_monitor(self):
@@ -99,7 +98,6 @@ class Manager:
         self._clients[monitor_id] = ControlClient(
             monitor_id, host, port, services, self._lock
         )
-        self._clients[monitor_id].daemon = True
         self._clients[monitor_id].start()
 
     def load_all_monitors(self):
@@ -110,10 +108,7 @@ class Manager:
             self._clients[monitor_id] = ControlClient(
                 monitor_id, host, port, services, self._lock
             )
-            self._clients[monitor_id].daemon = True
             self._clients[monitor_id].start()
-
-    def stop_all_monitors(self):
 
     def read_config(self):
         """Updates self._configs with current config file"""
@@ -163,7 +158,7 @@ class Manager:
         """Gets the id, monitor ip and port of a monitor service from user and sets in configs"""
         # Get ip, port, id
         monitor_ip = input("Enter monitor ip address: ")
-        monitor_port = input("Enter monitor port: ")
+        monitor_port = int(input("Enter monitor port: "))
         monitor_id = f"{monitor_ip}:{monitor_port}"
 
         # Ensure user wants to overwrite existing monitor
@@ -225,7 +220,7 @@ class Manager:
         )
         frequency = int(input("\tEnter frequency (Default = 60): ").strip() or "60")
 
-        # Return param dict
+        # Set in config
         self._configs[monitor_id]["Services"]["Ping"] = {
             "host": host,
             "ttl": ttl,
@@ -248,7 +243,7 @@ class Manager:
         )
         frequency = int(input("\tEnter frequency (Default = 60): ").strip() or "60")
 
-        # Return param dict
+        # Set in config
         self._configs[monitor_id]["Services"]["Tracert"] = {
             "host": host,
             "max_hops": max_hops,
@@ -265,7 +260,7 @@ class Manager:
         url = f"http://{url}"
         frequency = int(input("\tEnter frequency (Default = 60): ").strip() or "60")
 
-        # Return param dict
+        # Set in config
         self._configs[monitor_id]["Services"]["HTTP"] = {
             "url": url,
             "frequency": frequency,
@@ -280,7 +275,7 @@ class Manager:
         timeout = int(input("\tEnter timeout (Default = 5): "))
         frequency = int(input("\tEnter frequency (Default = 60): ").strip() or "60")
 
-        # Return param dict
+        # Set in config
         self._configs[monitor_id]["Services"]["HTTPS"] = {
             "url": url,
             "timeout": timeout,
@@ -294,7 +289,7 @@ class Manager:
         server = input("\tEnter ntp server: ")
         frequency = int(input("\tEnter frequency (Default = 60): ").strip() or "60")
 
-        # Return param dict
+        # Set in config
         self._configs[monitor_id]["Services"]["NTP"] = {
             "server": server,
             "frequency": frequency,
@@ -316,7 +311,7 @@ class Manager:
             record_types.append(record_type)
         frequency = int(input("\tEnter frequency (Default = 60): ").strip() or "60")
 
-        # Return param dict
+        # Set in config
         self._configs[monitor_id]["Services"]["DNS"] = {
             "server": server,
             "query": query,
@@ -332,7 +327,7 @@ class Manager:
         port = int(input("\tEnter port number: "))
         frequency = int(input("\tEnter frequency (Default = 60): ").strip() or "60")
 
-        # Return param dict
+        # Set in config
         self._configs[monitor_id]["Services"]["TCP"] = {
             "server": server,
             "port": port,
@@ -348,7 +343,7 @@ class Manager:
         timeout = int(input("\tEnter timeout (Default = 3): ").strip() or "3")
         frequency = int(input("\tEnter frequency (Default = 60): ").strip() or "60")
 
-        # Return param dict
+        # Set in config
         self._configs[monitor_id]["Services"]["UDP"] = {
             "server": server,
             "port": port,
@@ -364,7 +359,7 @@ class Manager:
         port = int(input("\tEnter port number: "))
         frequency = int(input("\tEnter frequency (Default = 60): ").strip() or "60")
 
-        # Return param dict
+        # Set in config
         self._configs[monitor_id]["Services"]["Echo"] = {
             "server": server,
             "port": port,
@@ -414,8 +409,8 @@ class ControlClient(threading.Thread):
 
     def run(self):
         """Start up socket and handle client behavior"""
-        global restart_flag
-        while not restart_flag:
+        global client_shutdown_flag
+        while not client_shutdown_flag:
             try:
                 # Connect to monitor service
                 self.connect()
@@ -448,8 +443,8 @@ class ControlClient(threading.Thread):
         # Enable keepalive behavior to receive messages for detecting dead connections
         self._socket.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
 
-        global restart_flag
-        while not restart_flag:
+        global client_shutdown_flag
+        while not client_shutdown_flag:
             self._lock.acquire()
             try:
                 print(
@@ -472,16 +467,18 @@ class ControlClient(threading.Thread):
     def set_id(self):
         """Send monitor service an ID"""
         # Assign ID to monitor service
-        with self._lock:
-            try:
-                response = self.send_command("SET_ID")
-                if response == "awaiting ID ...":
-                    print(
-                        f"Sending ID {self._monitor_id} to monitor service at {self._monitor_host}:{self._monitor_port}\n"
-                    )
-                    self._socket.send(self._monitor_id.encode("utf-8"))
-            except socket.error as e:
-                print(f"Socket error: {e}")
+        global client_shutdown_flag
+        if not client_shutdown_flag:
+            with self._lock:
+                try:
+                    response = self.send_command("SET_ID")
+                    if response == "awaiting ID ...":
+                        print(
+                            f"Sending ID {self._monitor_id} to monitor service at {self._monitor_host}:{self._monitor_port}"
+                        )
+                        self._socket.send(self._monitor_id.encode("utf-8"))
+                except socket.error as e:
+                    print(f"Socket error: {e}")
 
     def close(self):
         """Close connection with given monitor service"""
@@ -493,7 +490,7 @@ class ControlClient(threading.Thread):
         try:
             # Send command
             print(
-                f"Sending {command} command to monitor service {self._monitor_id} at {self._monitor_host}:{self._monitor_port}"
+                f"\nSending {command} command to monitor service {self._monitor_id} at {self._monitor_host}:{self._monitor_port}"
             )
             self._socket.sendall(command.encode())
 
@@ -503,38 +500,40 @@ class ControlClient(threading.Thread):
                 f"Command to monitor service {self._monitor_id} acknowledged: {response}"
             )
             return response
-        except socket.error as e:
-            print(f"Socket error: {e}")
+        except socket.error:
+            print(f"No connection to monitor {self._monitor_id}!")
 
     def distribute_tasks(self):
         """Distribute defined tasks to monitors"""
-        with self._lock:
-            try:
-                # Send the start command to prepare monitor for config
-                response = self.send_command("START")
+        global client_shutdown_flag
+        if not client_shutdown_flag:
+            with self._lock:
+                try:
+                    # Send the start command to prepare monitor for config
+                    response = self.send_command("START")
 
-                # If response is awaiting tasks, send config
-                if response == "awaiting tasks ...":
+                    # If response is awaiting tasks, send config
+                    if response == "awaiting tasks ...":
 
-                    # Create task config data and send
-                    task_configs = pickle.dumps(self._services)
-                    self._socket.sendall(task_configs)
+                        # Create task config data and send
+                        task_configs = pickle.dumps(self._services)
+                        self._socket.sendall(task_configs)
 
-                    # Await confirmation of tasks
-                    response = self._socket.recv(1024).decode("utf-8")
-                    print(
-                        f"Task start up at monitor service {self._monitor_id} acknowledged: {response}\n"
-                    )
+                        # Await confirmation of tasks
+                        response = self._socket.recv(1024).decode("utf-8")
+                        print(
+                            f"Task start up at monitor service {self._monitor_id} acknowledged: {response}"
+                        )
 
-            except socket.error as e:
-                print(f"Socket error: {e}")
+                except socket.error as e:
+                    print(f"Socket error: {e}")
 
     def monitor_status(self):
         """Await results and status updates for given monitor service"""
         # Await responses until error or condition
-        global restart_flag
+        global client_shutdown_flag
         try:
-            while not restart_flag:
+            while not client_shutdown_flag:
                 response = self._socket.recv(1024).decode("utf-8")
                 if response:
                     with self._lock:
@@ -580,5 +579,5 @@ if __name__ == "__main__":
         # Clear terminal
         os.system("cls") if sys.platform.startswith("win") else os.system("clear")
         manager = Manager()
-        signal.signal(signal.SIGINT, manager.restart_handler)
+        signal.signal(signal.SIGINT, manager.client_shutdown_handler)
         manager.start_manager()

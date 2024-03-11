@@ -26,20 +26,22 @@ class Monitor:
         self._tasks: dict = {}
 
         # Connection
-        self._conn: socket.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self._socket = None
+        self._conn = None
 
     def start(self):
         """Set up connection for management_service to send commands"""
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-            s.bind((self._monitor_host, self._monitor_port))
-            s.listen()
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as self._socket:
+            self._socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            self._socket.bind((self._monitor_host, self._monitor_port))
+            self._socket.listen()
             while not shutdown_flag:
                 print(
-                    f"Listening for connections on {self._monitor_host}:{self._monitor_port}\n"
+                    f"\nListening for connections on {self._monitor_host}:{self._monitor_port}"
                 )
-                self._conn, addr = s.accept()
+                self._conn, addr = self._socket.accept()
                 with self._conn:
-                    print(f"Connected by: {addr}\n")
+                    print(f"Connected by: {addr}")
 
                     try:
                         while True:
@@ -83,10 +85,9 @@ class Monitor:
 
                             elif command == "QUIT":
                                 # Alert client and shut down
-                                self._conn.sendall(
-                                    "stopping tasks and shutting down!".encode("utf-8")
-                                )
-                                self.shutdown_handler()
+                                self._conn.sendall("stopping tasks!".encode("utf-8"))
+                                self.stop_tasks()
+                                break
 
                     except socket.error as e:
                         print(f"Socket error: {e}")
@@ -114,25 +115,37 @@ class Monitor:
         for task in self._tasks.values():
             print("Starting task {}".format(task))
             task.start()
+        print("")
 
     def reconnect_tasks(self):
         """Re-establishes conn in task threads after reconnection"""
         for task in self._tasks.values():
             task.set_connection(self._conn)
 
-    def shutdown_handler(self, signum: int = None, frame: Any = None) -> None:
-        """Set shutdown flag, kill threads, exit application"""
+    def stop_tasks(self):
+        """Stops all tasks in task threads"""
         global shutdown_flag
         shutdown_flag = True
 
         # Wait for threads to quit
-        print("Killing threads ...")
+        print("\nKilling threads ...")
         for task in self._tasks.values():
             task.join()
 
-        # Close socket
+        self._tasks = {}
+
+        shutdown_flag = False
+
+    def shutdown_handler(self, signum: int = None, frame: Any = None) -> None:
+        """Set shutdown flag, kill threads, exit application"""
+        # Kill running tasks
+        self.stop_tasks()
+
+        # Close sockets
         print("Closing connection ...")
         self._conn.close()
+        print("Closing server socket ...")
+        self._socket.close()
 
         print("Shutting down server ... goodbye!")
         exit()
@@ -184,7 +197,7 @@ class NetworkTask(threading.Thread):
 
             # Get results
             print(
-                f"\n[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}][Monitor: {self._monitor_host}:{self._monitor_port}] - performing {self._task} test ..."
+                f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}][Monitor: {self._monitor_host}:{self._monitor_port}] - performing {self._task} test ..."
             )
             msg += run_service_check(self._task, self._params.values())
 
@@ -195,18 +208,14 @@ class NetworkTask(threading.Thread):
             # Sleep the loop for the given interval
             self._event.wait(self._frequency)
 
-    def stop(self) -> NoReturn:
-        """Stop thread by setting event and joining"""
-        self._event.set()
-        self.join()
-
     def send_msgs(self):
         """Send messages currently stored in self._msgs"""
         try:
-            print(
-                f"\n[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}][Monitor: {self._monitor_host}:{self._monitor_port}] - sending {self._task} test results ..."
-            )
+
             self._conn.sendall("\n".join(self._msgs).encode())
+            print(
+                f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}][Monitor: {self._monitor_host}:{self._monitor_port}] - successfully sent {self._task} test results!"
+            )
             self._msgs = []  # Clear msgs in case of successful send
         except socket.error:
             print(

@@ -137,8 +137,7 @@ def echo_service_check(ip_address, port):
 
     # TCP test
     msg += f"Testing TCP to Local Server {ip_address} at Port {port} ... \n"
-    msg += local_tcp_echo(
-        ip_address, port
-    )  # Need to rework this to return result string
+    status, description = local_tcp_echo(ip_address, port)
+    msg += f"Server: {ip_address}, TCP Port: {port}, TCP Port Status: {status}, Description: {description}"
 
     return msg
