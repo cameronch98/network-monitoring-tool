@@ -65,25 +65,25 @@ class Manager:
         print("\nInterrupt detected!")
 
         # Close sockets and kill client threads
-        for client in self._clients.values():
+        for monitor_id, client in self._clients.items():
 
             # Kill threads
-            print("Killing client threads ...")
+            print(f"Killing {monitor_id} client thread ...")
             client.join()
 
             # Send command to quit
-            print("Telling monitors to stop tasks ...")
+            print(f"Telling monitor {monitor_id} to stop tasks ...")
             client.send_command("QUIT")
 
             # Close sockets
-            print("Closing sockets ...")
+            print(f"\nClosing {monitor_id} client socket ...")
             client.close()
 
         # Reset flag
         client_shutdown_flag = False
 
         # Restart menu
-        print("Returning to main menu ...")
+        print("Returning to main menu ...\n")
         time.sleep(4)
         self.start_manager()
 
@@ -148,10 +148,14 @@ class Manager:
 
     def delete_config(self):
         """Deletes monitor service config based on user input and updates config file"""
+        # Ask user which one to delete and delete it
         monitor_id = monitor_choice_prompt(
             "Which monitor would you like to delete? [TAB]: ", self._configs
         )[0]
         del self._configs[monitor_id]
+
+        # Persist to configs.json
+        self.write_config()
         print(f"Config for monitor at {monitor_id} deleted!\n")
 
     def set_monitor_service(self):

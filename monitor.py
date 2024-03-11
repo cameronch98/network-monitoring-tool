@@ -128,7 +128,7 @@ class Monitor:
         shutdown_flag = True
 
         # Wait for threads to quit
-        print("\nKilling threads ...")
+        print("\nStopping tasks ...")
         for task in self._tasks.values():
             task.join()
 
@@ -143,7 +143,8 @@ class Monitor:
 
         # Close sockets
         print("Closing connection ...")
-        self._conn.close()
+        if self._conn:
+            self._conn.close()
         print("Closing server socket ...")
         self._socket.close()
 
