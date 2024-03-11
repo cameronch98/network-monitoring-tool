@@ -243,8 +243,10 @@ if __name__ == "__main__":
     print(r"| |\  |  __/ |_| |__| (_| | | | | | |".center(columns - 1))
     print(r"|_| \_|\___|\__|\____\__,_|_| |_| |_|".center(columns - 1))
     print("")
-    title_string = "Monitor Service"
+    title_string = "Network Monitoring Tool"
     print(title_string.center(columns - 1))
+    side_string = "Monitor"
+    print(side_string.center(columns - 1))
     author_string = "by Cameron Hester"
     print(author_string.center(columns - 1))
     print("\n")
