@@ -94,6 +94,9 @@ class Manager:
             "Which monitor service would you like to load? [TAB]: ", self._configs
         )
 
+        # Return message
+        print("\nPRESS CTRL+C TO STOP AND RETURN TO MENU")
+
         # Start control client
         self._clients[monitor_id] = ControlClient(
             monitor_id, host, port, services, self._lock
@@ -102,6 +105,9 @@ class Manager:
 
     def load_all_monitors(self):
         """Starts control client for all monitor services"""
+        # Return message
+        print("\nPRESS CTRL+C TO STOP AND RETURN TO MENU")
+
         # Loop through and start up clients
         for monitor_id, config in self._configs.items():
             host, port, services = config["IP"], config["Port"], config["Services"]
@@ -475,12 +481,20 @@ class ControlClient(threading.Thread):
         if not client_shutdown_flag:
             with self._lock:
                 try:
+                    # Send SET_ID command to start ID setting process
                     response = self.send_command("SET_ID")
                     if response == "awaiting ID ...":
-                        print(
-                            f"Sending ID {self._monitor_id} to monitor service at {self._monitor_host}:{self._monitor_port}"
-                        )
+
+                        # Send ID to monitor service
+                        print(f"Sending ID to monitor service {self._monitor_id}")
                         self._socket.send(self._monitor_id.encode("utf-8"))
+
+                        # Wait for acknowledgement of ID being set
+                        response = self._socket.recv(1024).decode("utf-8")
+                        print(
+                            f"ID acknowledged by monitor {self._monitor_id}: {response}"
+                        )
+
                 except socket.error as e:
                     print(f"Socket error: {e}")
 
@@ -493,9 +507,7 @@ class ControlClient(threading.Thread):
         """Send command over given monitor service"""
         try:
             # Send command
-            print(
-                f"\nSending {command} command to monitor service {self._monitor_id} at {self._monitor_host}:{self._monitor_port}"
-            )
+            print(f"\nSending {command} command to monitor service {self._monitor_id}")
             self._socket.sendall(command.encode())
 
             # Await acknowledgment
@@ -521,12 +533,23 @@ class ControlClient(threading.Thread):
 
                         # Create task config data and send
                         task_configs = pickle.dumps(self._services)
+                        print(
+                            f"Sending task configs to monitor service {self._monitor_id}"
+                        )
                         self._socket.sendall(task_configs)
+
+                        # Get confirmation each task was received
+                        for i, task in enumerate(self._services.keys(), start=1):
+                            received_task = self._socket.recv(1024).decode("utf-8")
+                            print(f"\nTask {i} received by monitor {self._monitor_id}:")
+                            print(f"{received_task}")
+                            print(f"Expected task:")
+                            print(f"{task}: {self._services[task]}")
 
                         # Await confirmation of tasks
                         response = self._socket.recv(1024).decode("utf-8")
                         print(
-                            f"Task start up at monitor service {self._monitor_id} acknowledged: {response}"
+                            f"\nTask start up at monitor service {self._monitor_id} acknowledged: {response}"
                         )
 
                 except socket.error as e:

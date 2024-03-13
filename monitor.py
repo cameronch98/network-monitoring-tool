@@ -57,9 +57,12 @@ class Monitor:
                             # Start up and bulk operation commands
                             if command == "SET_ID":
                                 print("Awaiting ID ...")
-                                self._conn.sendall("awaiting ID ...".encode("utf-8"))
+                                self._conn.send("awaiting ID ...".encode("utf-8"))
                                 self._id = self._conn.recv(1024).decode("utf-8")
                                 print(f"ID received and set: {self._id}")
+                                self._conn.send(
+                                    f"ID set to {self._id}!".encode("utf-8")
+                                )
 
                             elif command == "START":
                                 # Skip config and reconnect existing threads if active tasks
@@ -67,25 +70,37 @@ class Monitor:
                                     print(
                                         "Tasks already started! Reconnecting task threads to send data ..."
                                     )
-                                    self._conn.sendall(
+                                    self._conn.send(
                                         "reconnecting tasks ...".encode("utf-8")
                                     )
                                     self.reconnect_tasks()
                                 else:
+                                    # Let manager know awaiting tasks
                                     print("Awaiting tasks ...")
-                                    self._conn.sendall(
+                                    self._conn.send(
                                         "awaiting tasks ...".encode("utf-8")
                                     )
+
+                                    # Receive and load tasks
                                     config = self._conn.recv(1024)
                                     config = pickle.loads(config)
                                     print(f"Tasks received: {config}\n")
-                                    self._conn.sendall("tasks started!".encode("utf-8"))
+
+                                    # Send confirmation of each individual task
+                                    for task, params in config.items():
+                                        self._conn.send(
+                                            f"{task}: {params}".encode("utf-8")
+                                        )
+                                        time.sleep(3)
+
+                                    # Start tasks and confirm they've started to manager
                                     self.configure_tasks(config)
                                     self.start_tasks()
+                                    self._conn.send("tasks started!".encode("utf-8"))
 
                             elif command == "QUIT":
                                 # Alert client and shut down
-                                self._conn.sendall("stopping tasks!".encode("utf-8"))
+                                self._conn.send("stopping tasks!".encode("utf-8"))
                                 self.stop_tasks()
                                 break
 
@@ -102,8 +117,7 @@ class Monitor:
             frequency = params["frequency"]
             del params["frequency"]
             self._tasks[task] = NetworkTask(
-                self._monitor_host,
-                self._monitor_port,
+                self._id,
                 task,
                 params,
                 frequency,
@@ -155,8 +169,7 @@ class Monitor:
 class NetworkTask(threading.Thread):
     def __init__(
         self,
-        monitor_host: str,
-        monitor_port: int,
+        monitor_id: str,
         task: str,
         params: dict,
         frequency: int,
@@ -165,8 +178,7 @@ class NetworkTask(threading.Thread):
         super().__init__()
 
         # Monitor information
-        self._monitor_host: str = monitor_host
-        self._monitor_port: int = monitor_port
+        self._monitor_id: str = monitor_id
 
         # Network test information
         self._task: str = task
@@ -185,7 +197,7 @@ class NetworkTask(threading.Thread):
     def run(self) -> NoReturn:
 
         # Loop until shutdown event is set
-        time.sleep(3)
+        time.sleep(20)
         while not shutdown_flag:
 
             # Init msg
@@ -193,12 +205,12 @@ class NetworkTask(threading.Thread):
 
             # Header
             columns, lines = shutil.get_terminal_size()
-            msg += f"\n[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}][Monitor: {self._monitor_host}:{self._monitor_port}] {self._task} Service Check \n"
+            msg += f"\n[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}][Monitor: {self._monitor_id}] {self._task} Service Check \n"
             msg += "=" * columns + "\n"
 
             # Get results
             print(
-                f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}][Monitor: {self._monitor_host}:{self._monitor_port}] - performing {self._task} test ..."
+                f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}][Monitor: {self._monitor_id}] - performing {self._task} test ..."
             )
             msg += run_service_check(self._task, self._params.values())
 
@@ -215,15 +227,15 @@ class NetworkTask(threading.Thread):
 
             self._conn.sendall("\n".join(self._msgs).encode())
             print(
-                f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}][Monitor: {self._monitor_host}:{self._monitor_port}] - successfully sent {self._task} test results!"
+                f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}][Monitor: {self._monitor_id}] - successfully sent {self._task} test results!"
             )
             self._msgs = []  # Clear msgs in case of successful send
         except socket.error:
             print(
-                f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}][Monitor: {self._monitor_host}:{self._monitor_port}] - connection to management service down!"
+                f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}][Monitor: {self._monitor_id}] - connection to management service down!"
             )
             print(
-                f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}][Monitor: {self._monitor_host}:{self._monitor_port}] - saving {self._task} task results for reconnection - results saved: {len(self._msgs)}"
+                f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}][Monitor: {self._monitor_id}] - saving {self._task} task results for reconnection - results saved: {len(self._msgs)}"
             )
             self._conn.close()
 
